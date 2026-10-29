@@ -1,0 +1,263 @@
+// DP Data Sub — data model
+// Money is always stored as an integer number of kobo (₦1 = 100 kobo).
+// No floating point is used for money anywhere in this project.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum LedgerDirection {
+  CREDIT
+  DEBIT
+}
+
+enum LedgerType {
+  FUNDING
+  PURCHASE
+  REFUND
+  REFERRAL_REWARD
+  ADMIN_ADJUSTMENT
+}
+
+enum TxStatus {
+  PENDING
+  SUCCESSFUL
+  FAILED
+  REFUNDED
+}
+
+enum TokenPurpose {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
+enum ServiceStatus {
+  ENABLED
+  PROVIDER_CONFIG_REQUIRED
+  COMING_SOON
+}
+
+enum PlanSource {
+  REFERENCE
+  PROVIDER
+}
+
+model User {
+  id              String    @id @default(cuid())
+  fullName        String
+  email           String    @unique
+  phone           String    @unique
+  passwordHash    String
+  role            Role      @default(USER)
+  emailVerifiedAt DateTime?
+  referralCode    String    @unique
+  referredById    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  referredBy   User?         @relation("Referrals", fields: [referredById], references: [id], onDelete: SetNull)
+  referrals    User[]        @relation("Referrals")
+  wallet       Wallet?
+  sessions     Session[]
+  tokens       AuthToken[]
+  orders       VtuOrder[]
+  payments     PaymentAttempt[]
+  referralsMade Referral[]   @relation("Referrer")
+  referralAsReferee Referral? @relation("Referee")
+  auditEvents  AuditEvent[]
+
+  @@index([referredById])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  userAgent String?
+  ip        String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model AuthToken {
+  id        String       @id @default(cuid())
+  userId    String
+  tokenHash String       @unique
+  purpose   TokenPurpose
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime     @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+}
+
+model Wallet {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  balanceKobo  Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entries LedgerEntry[]
+
+  @@index([userId])
+}
+
+// Append-only. Rows are inserted, never updated or deleted by application code.
+model LedgerEntry {
+  id              String          @id @default(cuid())
+  walletId        String
+  userId          String
+  direction       LedgerDirection
+  type            LedgerType
+  amountKobo      Int
+  balanceAfterKobo Int
+  reference       String          @unique
+  narration       String
+  orderId         String?
+  paymentId       String?
+  metadata        Json?
+  createdAt       DateTime        @default(now())
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Restrict)
+
+  @@index([userId, createdAt])
+  @@index([orderId])
+}
+
+model PaymentAttempt {
+  id              String   @id @default(cuid())
+  userId          String
+  reference       String   @unique
+  provider        String   @default("paystack")
+  amountKobo      Int
+  status          TxStatus @default(PENDING)
+  authorizationUrl String?
+  providerReference String?
+  channel         String?
+  verifiedAt      DateTime?
+  failureReason   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model VtuOrder {
+  id               String   @id @default(cuid())
+  userId           String
+  reference        String   @unique
+  idempotencyKey   String   @unique
+  serviceType      String
+  network          String?
+  dataType         String?
+  planCode         String?
+  planName         String?
+  recipient        String
+  amountKobo       Int
+  costKobo         Int?
+  status           TxStatus @default(PENDING)
+  providerName     String?
+  providerReference String? @unique
+  providerStatus   String?
+  providerMessage  String?
+  failureReason    String?
+  refundedAt       DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+model DataPlan {
+  id         String     @id @default(cuid())
+  network    String
+  dataType   String
+  planCode   String
+  name       String
+  sizeMb     Int
+  validity   String
+  priceKobo  Int
+  costKobo   Int?
+  source     PlanSource @default(REFERENCE)
+  active     Boolean    @default(true)
+  sortOrder  Int        @default(0)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  @@unique([network, dataType, planCode])
+  @@index([network, dataType, active])
+}
+
+model ServiceAvailability {
+  id      String        @id @default(cuid())
+  key     String        @unique
+  name    String
+  status  ServiceStatus
+  note    String?
+  sortOrder Int         @default(0)
+  updatedAt DateTime    @updatedAt
+}
+
+model Referral {
+  id              String   @id @default(cuid())
+  referrerId      String
+  refereeId       String   @unique
+  code            String
+  qualifiedAt     DateTime?
+  rewardClaimedAt DateTime?
+  rewardKobo      Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  referrer User @relation("Referrer", fields: [referrerId], references: [id], onDelete: Cascade)
+  referee  User @relation("Referee", fields: [refereeId], references: [id], onDelete: Cascade)
+
+  @@index([referrerId, createdAt])
+}
+
+model AuditEvent {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actorRole String?
+  action    String
+  entity    String?
+  entityId  String?
+  metadata  Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([action, createdAt])
+}
+
+model Announcement {
+  id        String   @id @default(cuid())
+  title     String
+  body      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
