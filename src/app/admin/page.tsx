@@ -1,13 +1,24 @@
 import React from 'react';
 
 import Link from "next/link";
-import { AlertTriangle, CheckCircle2, ShieldCheck, Users } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronRight,
+  KeyRound,
+  PlugZap,
+  ServerCog,
+  ShieldCheck,
+  Users,
+} from "lucide-react";
 
 import { AdminActions } from "@/components/admin/admin-actions";
 import { AppShell } from "@/components/layout/app-shell";
 import { StatusBadge } from "@/components/transactions";
 import { requireAdmin } from "@/lib/auth";
-import { alrahuzHealth, isPaystackReady, paystackHealth, resendConfig } from "@/lib/config";
+import { loadAlrahuzHealth, loadAlrahuzStatus } from "@/lib/alrahuz-settings";
+import { resendConfig } from "@/lib/config";
+import { loadPaymentGatewayStatus } from "@/lib/payment-gateway";
 import { prisma } from "@/lib/db";
 import { formatDateTime } from "@/lib/format";
 import { formatNaira } from "@/lib/money";
@@ -47,9 +58,26 @@ export default async function AdminPage() {
   const pendingCount = orders.filter((order) => order.status === "PENDING").length;
   const credits = ledgerTotals.find((row) => row.direction === "CREDIT")?._sum.amountKobo ?? 0;
   const debits = ledgerTotals.find((row) => row.direction === "DEBIT")?._sum.amountKobo ?? 0;
-  const alrahuz = alrahuzHealth();
-  const paystack = paystackHealth();
+  const [alrahuz, alrahuzStatus, gateway] = await Promise.all([
+    loadAlrahuzHealth(),
+    loadAlrahuzStatus(),
+    loadPaymentGatewayStatus(),
+  ]);
   const email = resendConfig();
+  const alrahuzBadge =
+    alrahuzStatus.state === "connected"
+      ? "Connected"
+      : alrahuzStatus.state === "failed"
+        ? "Connection failed"
+        : alrahuzStatus.state === "untested"
+          ? "Not verified yet"
+          : "Not configured";
+  const alrahuzBadgeTone =
+    alrahuzStatus.state === "connected"
+      ? "border-[#C9EBD9] bg-[#EAF7F0] text-[#0B7A45]"
+      : alrahuzStatus.state === "failed"
+        ? "border-[#F6D3D0] bg-[#FDEDEC] text-[#A32B22]"
+        : "border-line bg-white text-ink-muted";
 
   const health = [
     {
@@ -61,10 +89,14 @@ export default async function AdminPage() {
     },
     {
       name: "Paystack",
-      ok: isPaystackReady(),
-      detail: isPaystackReady()
-        ? "Wallet funding can be initialised and verified."
-        : `Missing: ${paystack.missing.join(", ") || "PAYSTACK_SECRET_KEY"}`,
+      ok: gateway.ready,
+      detail: gateway.ready
+        ? `Wallet funding is live in ${gateway.mode === "TEST" ? "test" : "live"} mode, using keys from ${
+            gateway.source === "saved" ? "Payment gateway settings" : "the server environment"
+          }.`
+        : gateway.secretKey.configured
+          ? "A key is configured but funding is blocked — check Payment gateway settings."
+          : `Missing: ${gateway.missing.join(", ") || "PAYSTACK_SECRET_KEY"}`,
     },
     {
       name: "Resend email",
@@ -95,6 +127,16 @@ export default async function AdminPage() {
             <p className="mt-0.5 text-[12.5px] text-ink-muted">
               Operations, reconciliation and integration health. Secrets are never displayed.
             </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Link href="/admin/payment-gateway" className="btn-brand inline-flex items-center gap-1.5">
+                <KeyRound className="size-4" />
+                Payment gateway settings
+              </Link>
+              <Link href="/admin/alrahuz" className="btn-ghost-line inline-flex items-center gap-1.5">
+                <PlugZap className="size-4" />
+                Alrahuz API settings
+              </Link>
+            </div>
           </div>
           <span className="chip">
             <ShieldCheck className="size-3 text-brand" /> Role: ADMIN
@@ -114,6 +156,102 @@ export default async function AdminPage() {
             </div>
           ))}
         </div>
+
+        <section className="panel overflow-hidden" id="configuration">
+          <div className="border-b border-line px-4 py-3">
+            <h2 className="text-[14px] font-semibold">Configuration</h2>
+            <p className="mt-0.5 text-[11.5px] text-ink-muted">
+              Keys are validated on the server, encrypted before storage and never sent back to the browser.
+            </p>
+          </div>
+          <ul className="divide-y divide-line">
+            <li>
+              <Link
+                href="/admin/payment-gateway"
+                className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-secondary/60"
+              >
+                <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-brand-tint text-brand">
+                  <KeyRound className="size-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="text-[13px] font-semibold text-ink">Payment gateway settings</span>
+                    <span
+                      className={
+                        gateway.ready
+                          ? "rounded-full border border-[#C9EBD9] bg-[#EAF7F0] px-2 py-0.5 text-[10px] font-semibold text-[#0B7A45]"
+                          : "rounded-full border border-line bg-white px-2 py-0.5 text-[10px] font-semibold text-ink-muted"
+                      }
+                    >
+                      {gateway.ready
+                        ? `${gateway.mode === "TEST" ? "Test" : "Live"} mode · ready`
+                        : "Not configured"}
+                    </span>
+                  </span>
+                  <span className="mt-0.5 block text-[11.5px] leading-relaxed text-ink-muted">
+                    Paystack secret key, public key and webhook secret used for wallet funding. Leave the
+                    fields blank to keep an existing secret unchanged.
+                  </span>
+                </span>
+                <ChevronRight className="mt-2 size-4 shrink-0 text-ink-muted" />
+              </Link>
+            </li>
+            <li>
+              <Link
+                href="/admin/alrahuz"
+                className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-secondary/60"
+              >
+                <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-brand-tint text-brand">
+                  <PlugZap className="size-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="text-[13px] font-semibold text-ink">Alrahuz API settings</span>
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${alrahuzBadgeTone}`}
+                    >
+                      {alrahuzBadge}
+                    </span>
+                  </span>
+                  <span className="mt-0.5 block text-[11.5px] leading-relaxed text-ink-muted">
+                    Alrahuz API key and base URL, encrypted on the server. The key is masked and Test
+                    Connection runs a read-only check.
+                  </span>
+                </span>
+                <ChevronRight className="mt-2 size-4 shrink-0 text-ink-muted" />
+              </Link>
+            </li>
+            <li>
+              <Link
+                href="/provider-status"
+                className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-secondary/60"
+              >
+                <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-secondary text-ink-muted">
+                  <ServerCog className="size-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="text-[13px] font-semibold text-ink">Data provider status</span>
+                    <span
+                      className={
+                        alrahuz.configured
+                          ? "rounded-full border border-[#C9EBD9] bg-[#EAF7F0] px-2 py-0.5 text-[10px] font-semibold text-[#0B7A45]"
+                          : "rounded-full border border-line bg-white px-2 py-0.5 text-[10px] font-semibold text-ink-muted"
+                      }
+                    >
+                      {alrahuz.configured ? "Ready" : `${alrahuz.missing.length} value(s) missing`}
+                    </span>
+                  </span>
+                  <span className="mt-0.5 block text-[11.5px] leading-relaxed text-ink-muted">
+                    Alrahuz API key, base URL and endpoint verification. Credentials are managed in
+                    Alrahuz API settings; endpoint confirmation stays a server-side flag.
+                  </span>
+                </span>
+                <ChevronRight className="mt-2 size-4 shrink-0 text-ink-muted" />
+              </Link>
+            </li>
+          </ul>
+        </section>
 
         <section className="panel overflow-hidden">
           <div className="border-b border-line px-4 py-3">

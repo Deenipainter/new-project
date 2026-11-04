@@ -4,6 +4,8 @@ import type { NextConfig } from "next";
 // freely: IQX never overwrites a config that already exists.
 const nextConfig: NextConfig = {
   devIndicators: false,
+  // `postinstall` runs `prisma generate`, so a newly added model only appears in
+  // the running dev server after it reloads its process.
   // three / @react-three/* ship untranspiled ESM that Next must transpile, else
   // 3D scenes fail to render. Listing packages a project does not install is a
   // harmless no-op.

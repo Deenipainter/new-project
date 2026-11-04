@@ -1,6 +1,6 @@
 import { badRequest, ok, readBody, serverError, unavailable, unauthorized } from "@/lib/api";
 import { getCurrentUser } from "@/lib/auth";
-import { isPaystackReady } from "@/lib/config";
+import { isPaystackConfigured, resolvePaystackConfig } from "@/lib/payment-gateway";
 import { settlePaymentAttempt } from "@/lib/payments";
 
 type Body = { reference?: string };
@@ -13,7 +13,8 @@ export async function POST(request: Request) {
   const reference = (body?.reference || "").trim();
   if (!reference) return badRequest("Payment reference is required.");
 
-  if (!isPaystackReady()) {
+  const paystack = await resolvePaystackConfig();
+  if (!isPaystackConfigured(paystack)) {
     return unavailable(
       "Payments are not configured, so this payment cannot be verified.",
       "PAYMENTS_NOT_CONFIGURED",

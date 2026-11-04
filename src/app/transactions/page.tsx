@@ -130,7 +130,7 @@ export default async function TransactionsPage({
                 href="/wallet/fund"
                 className="mt-3 inline-flex h-9 items-center rounded-lg bg-brand px-4 text-[12.5px] font-semibold text-white"
               >
-                Add money
+                Fund wallet
               </Link>
             )}
           </div>

@@ -5,7 +5,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { newReference } from "@/lib/money";
 import { creditWallet, debitWallet } from "@/lib/wallet";
-import { alrahuzHealth, isAlrahuzReady } from "@/lib/config";
+import { loadAlrahuzHealth } from "@/lib/alrahuz-settings";
 import {
   ProviderNotConfiguredError,
   purchaseData,
@@ -64,8 +64,9 @@ export async function placeDataOrder(input: DataOrderInput) {
       409,
     );
   }
-  if (!isAlrahuzReady()) {
-    throw new ProviderNotConfiguredError(alrahuzHealth().missing);
+  const providerHealth = await loadAlrahuzHealth();
+  if (!providerHealth.configured) {
+    throw new ProviderNotConfiguredError(providerHealth.missing);
   }
 
   const reference = newReference("DP");
@@ -248,7 +249,8 @@ export async function reconcileOrder(orderId: string, actorId?: string) {
   if (!order) throw new OrderError("ORDER_NOT_FOUND", "Order not found.", 404);
   if (order.status !== "PENDING") return order;
 
-  if (!isAlrahuzReady()) throw new ProviderNotConfiguredError(alrahuzHealth().missing);
+  const providerHealth = await loadAlrahuzHealth();
+  if (!providerHealth.configured) throw new ProviderNotConfiguredError(providerHealth.missing);
 
   const result = await requeryTransaction(order.providerReference ?? order.reference);
 

@@ -5,10 +5,21 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { LogOut, Loader2 } from "lucide-react";
 
-export function ProfileForms({ fullName, phone }: { fullName: string; phone: string }) {
+export function ProfileForms({
+  fullName,
+  phone,
+  email,
+}: {
+  fullName: string;
+  phone: string;
+  email: string;
+}) {
   const router = useRouter();
   const [name, setName] = useState(fullName);
   const [phoneNumber, setPhoneNumber] = useState(phone);
+  const [emailAddress, setEmailAddress] = useState(email);
+  const [emailPassword, setEmailPassword] = useState("");
+  const emailChanged = emailAddress.trim().toLowerCase() !== email.trim().toLowerCase();
   const [profileState, setProfileState] = useState<{ busy: boolean; message: string | null; error: string | null }>({
     busy: false,
     message: null,
@@ -29,14 +40,24 @@ export function ProfileForms({ fullName, phone }: { fullName: string; phone: str
       const response = await fetch("/api/profile", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fullName: name, phone: phoneNumber }),
+        body: JSON.stringify({
+          fullName: name,
+          phone: phoneNumber,
+          email: emailAddress,
+          currentPassword: emailPassword || undefined,
+        }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         setProfileState({ busy: false, message: null, error: payload.error ?? "Could not save." });
         return;
       }
-      setProfileState({ busy: false, message: "Profile updated.", error: null });
+      setEmailPassword("");
+      setProfileState({
+        busy: false,
+        message: emailChanged ? "Login email updated — use it next time you sign in." : "Profile updated.",
+        error: null,
+      });
       router.refresh();
     } catch {
       setProfileState({ busy: false, message: null, error: "Network problem. Please try again." });
@@ -69,7 +90,7 @@ export function ProfileForms({ fullName, phone }: { fullName: string; phone: str
       <section className="panel p-4">
         <h2 className="text-[14px] font-semibold">Your details</h2>
         <p className="mt-0.5 text-[11.5px] text-ink-muted">
-          Only your name and phone number are editable. Email, role and balance are server-controlled.
+          Your name, phone number and login email are editable. Role, balance and IDs stay server-controlled.
         </p>
         <form onSubmit={saveProfile} className="mt-3 space-y-3">
           <div>
@@ -95,6 +116,37 @@ export function ProfileForms({ fullName, phone }: { fullName: string; phone: str
               className="app-input"
             />
           </div>
+          <div>
+            <label htmlFor="email" className="field-label">
+              Login email
+            </label>
+            <input
+              id="email"
+              type="email"
+              autoComplete="email"
+              inputMode="email"
+              value={emailAddress}
+              onChange={(event) => setEmailAddress(event.target.value)}
+              className="app-input"
+            />
+            <p className="field-hint">This is the address you sign in with and where account mail is sent.</p>
+          </div>
+          {emailChanged && (
+            <div>
+              <label htmlFor="emailPassword" className="field-label">
+                Current password (required to change your email)
+              </label>
+              <input
+                id="emailPassword"
+                type="password"
+                autoComplete="current-password"
+                value={emailPassword}
+                onChange={(event) => setEmailPassword(event.target.value)}
+                className="app-input"
+                required
+              />
+            </div>
+          )}
           {profileState.error && (
             <p role="alert" className="rounded-lg border border-[#F6D3D0] bg-[#FDEDEC] px-3 py-2 text-[11.5px] font-medium text-[#A32B22]">
               {profileState.error}

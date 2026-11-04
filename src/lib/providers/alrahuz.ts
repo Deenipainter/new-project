@@ -1,6 +1,11 @@
 import "server-only";
 
-import { alrahuzConfig, alrahuzHealth } from "@/lib/config";
+import {
+  alrahuzHealthFromConfig,
+  isAlrahuzConfigured,
+  resolveAlrahuzConfig,
+  type ResolvedAlrahuzConfig,
+} from "@/lib/alrahuz-settings";
 import { fetchWithTimeout, readJsonSafe, redact } from "@/lib/http";
 import {
   nairaToKoboValue,
@@ -51,14 +56,21 @@ export class ProviderRequestError extends Error {
   }
 }
 
-function assertConfigured() {
-  const health = alrahuzHealth();
+async function assertConfigured(): Promise<ResolvedAlrahuzConfig> {
+  const cfg = await resolveAlrahuzConfig();
+  if (!isAlrahuzConfigured(cfg)) {
+    throw new ProviderNotConfiguredError(alrahuzHealthFromConfig(cfg).missing);
+  }
+  const health = alrahuzHealthFromConfig(cfg);
   if (!health.configured) throw new ProviderNotConfiguredError(health.missing);
-  return alrahuzConfig();
+  return cfg;
 }
 
-async function request(path: string, init: RequestInit = {}): Promise<unknown> {
-  const cfg = assertConfigured();
+async function request(
+  cfg: ResolvedAlrahuzConfig,
+  path: string,
+  init: RequestInit = {},
+): Promise<unknown> {
   const url = new URL(`${cfg.baseUrl}${path.startsWith("/") ? path : `/${path}`}`);
 
   const response = await fetchWithTimeout(url.toString(), {
@@ -105,8 +117,8 @@ export type RawPlanPayload = {
  * missing a plan id or a price are skipped rather than guessed.
  */
 export async function fetchProviderPlans(hints: RawPlanPayload = {}): Promise<ProviderPlan[]> {
-  const cfg = assertConfigured();
-  const payload = await request(cfg.paths.dataPlans, { method: "GET" });
+  const cfg = await assertConfigured();
+  const payload = await request(cfg, cfg.paths.dataPlans, { method: "GET" });
   const rows = planRows(payload);
   const plans: ProviderPlan[] = [];
 
@@ -133,8 +145,8 @@ export async function fetchProviderPlans(hints: RawPlanPayload = {}): Promise<Pr
 }
 
 export async function checkProviderBalance(): Promise<{ balanceKobo: number | null; message: string }> {
-  const cfg = assertConfigured();
-  const payload = await request(cfg.paths.balance, { method: "GET" });
+  const cfg = await assertConfigured();
+  const payload = await request(cfg, cfg.paths.balance, { method: "GET" });
   const raw = pick(payload, ["balance", "wallet", "account_balance", "data"]);
   const value = typeof raw === "object" && raw !== null ? pick(raw, ["balance", "amount"]) : raw;
   const naira = Number(value);
@@ -158,8 +170,8 @@ export async function purchaseData(input: {
   phone: string;
   customerReference: string;
 }): Promise<PurchaseResult> {
-  const cfg = assertConfigured();
-  const payload = await request(cfg.paths.purchaseData, {
+  const cfg = await assertConfigured();
+  const payload = await request(cfg, cfg.paths.purchaseData, {
     method: "POST",
     body: JSON.stringify({
       network: input.network,
@@ -188,9 +200,9 @@ export async function purchaseData(input: {
 }
 
 export async function requeryTransaction(reference: string): Promise<PurchaseResult> {
-  const cfg = assertConfigured();
+  const cfg = await assertConfigured();
   const url = `${cfg.paths.requery}${cfg.paths.requery.includes("?") ? "&" : "?"}reference=${encodeURIComponent(reference)}`;
-  const payload = await request(url, { method: "GET" });
+  const payload = await request(cfg, url, { method: "GET" });
   const statusRaw = pick(payload, ["status", "transaction_status", "state"]);
   return {
     status: normalizeStatus(statusRaw),

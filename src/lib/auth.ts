@@ -93,12 +93,23 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
       return null;
     }
     const { user } = session;
+    // ADMIN_EMAILS is the source of truth for admin access. An account created
+    // before its address was added there would otherwise stay a normal user and
+    // never see /admin, so promote it the first time it is seen. Never demote:
+    // removing an address from ADMIN_EMAILS should not lock out an existing admin.
+    let role = user.role;
+    if (role !== "ADMIN" && isAdminEmail(user.email)) {
+      await prisma.user
+        .update({ where: { id: user.id }, data: { role: "ADMIN" } })
+        .catch(() => undefined);
+      role = "ADMIN";
+    }
     return {
       id: user.id,
       fullName: user.fullName,
       email: user.email,
       phone: user.phone,
-      role: user.role,
+      role,
       emailVerifiedAt: user.emailVerifiedAt,
       referralCode: user.referralCode,
       balanceKobo: user.wallet?.balanceKobo ?? 0,

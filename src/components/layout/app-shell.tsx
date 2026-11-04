@@ -7,8 +7,10 @@ import { useState } from "react";
 import {
   ArrowLeftRight,
   House,
+  KeyRound,
   LayoutGrid,
   LogOut,
+  PlugZap,
   ShieldCheck,
   User,
   Wallet as WalletIcon,
@@ -57,6 +59,14 @@ export function AppShell({ user, children }: { user: ShellUser; children: React.
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join("");
+  const mobileNav =
+    user.role === "ADMIN"
+      ? [
+          ...NAV,
+          { href: "/admin", label: "Admin", icon: ShieldCheck },
+          { href: "/admin/alrahuz", label: "Alrahuz", icon: PlugZap },
+        ]
+      : NAV;
 
   async function signOut() {
     setSigningOut(true);
@@ -93,18 +103,44 @@ export function AppShell({ user, children }: { user: ShellUser; children: React.
               );
             })}
             {user.role === "ADMIN" && (
-              <Link
-                href="/admin"
-                className={cn(
-                  "flex items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] font-medium transition-colors",
-                  isActive(pathname, "/admin")
-                    ? "bg-brand-tint text-brand"
-                    : "text-ink-muted hover:bg-secondary hover:text-ink",
-                )}
-              >
-                <ShieldCheck className="size-[18px]" strokeWidth={1.9} />
-                Admin
-              </Link>
+              <>
+                <Link
+                  href="/admin"
+                  className={cn(
+                    "flex items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] font-medium transition-colors",
+                    pathname === "/admin"
+                      ? "bg-brand-tint text-brand"
+                      : "text-ink-muted hover:bg-secondary hover:text-ink",
+                  )}
+                >
+                  <ShieldCheck className="size-[18px]" strokeWidth={1.9} />
+                  Admin
+                </Link>
+                <Link
+                  href="/admin/payment-gateway"
+                  className={cn(
+                    "flex items-center gap-3 rounded-xl px-3 py-2 pl-6 text-[13px] font-medium transition-colors",
+                    isActive(pathname, "/admin/payment-gateway")
+                      ? "bg-brand-tint text-brand"
+                      : "text-ink-muted hover:bg-secondary hover:text-ink",
+                  )}
+                >
+                  <KeyRound className="size-4" strokeWidth={1.9} />
+                  Payment gateway
+                </Link>
+                <Link
+                  href="/admin/alrahuz"
+                  className={cn(
+                    "flex items-center gap-3 rounded-xl px-3 py-2 pl-6 text-[13px] font-medium transition-colors",
+                    isActive(pathname, "/admin/alrahuz")
+                      ? "bg-brand-tint text-brand"
+                      : "text-ink-muted hover:bg-secondary hover:text-ink",
+                  )}
+                >
+                  <PlugZap className="size-4" strokeWidth={1.9} />
+                  Alrahuz API
+                </Link>
+              </>
             )}
           </nav>
 
@@ -120,7 +156,7 @@ export function AppShell({ user, children }: { user: ShellUser; children: React.
                 href="/wallet/fund"
                 className="mt-2 inline-flex text-[12.5px] font-semibold text-brand hover:underline"
               >
-                Add money
+                Fund wallet
               </Link>
             </div>
             <button
@@ -148,13 +184,24 @@ export function AppShell({ user, children }: { user: ShellUser; children: React.
               <WalletIcon className="size-3.5 text-brand" />
               <span className="numeric">{formatNaira(user.balanceKobo, { withDecimals: true })}</span>
             </Link>
-            <Link
-              href="/profile"
-              className="grid size-9 place-items-center rounded-full bg-brand-tint text-[12px] font-bold text-brand"
-              aria-label="Your profile"
-            >
-              {initials || "DP"}
-            </Link>
+            <span className="flex items-center gap-2">
+              {user.role === "ADMIN" && (
+                <Link
+                  href="/admin"
+                  aria-label="Admin dashboard"
+                  className="grid size-9 place-items-center rounded-full border border-line bg-white text-brand"
+                >
+                  <ShieldCheck className="size-4" />
+                </Link>
+              )}
+              <Link
+                href="/profile"
+                className="grid size-9 place-items-center rounded-full bg-brand-tint text-[12px] font-bold text-brand"
+                aria-label="Your profile"
+              >
+                {initials || "DP"}
+              </Link>
+            </span>
           </header>
 
           <main className="mx-auto w-full max-w-[900px] px-4 pb-28 pt-4 md:px-0 md:pb-12 md:pt-7">
@@ -169,7 +216,7 @@ export function AppShell({ user, children }: { user: ShellUser; children: React.
         aria-label="Primary"
       >
         <ul className="mx-auto flex max-w-lg items-stretch">
-          {NAV.map((item) => {
+          {mobileNav.map((item) => {
             const active = isActive(pathname, item.href);
             return (
               <li key={item.href} className="flex-1">

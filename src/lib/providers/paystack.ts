@@ -2,16 +2,37 @@ import "server-only";
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-import { paystackConfig, isPaystackReady } from "@/lib/config";
 import { fetchWithTimeout, readJsonSafe } from "@/lib/http";
+import {
+  isPaystackConfigured,
+  paystackLiveBlocked,
+  resolvePaystackConfig,
+  type ResolvedPaystackConfig,
+} from "@/lib/payment-gateway";
 
 export class PaystackNotConfiguredError extends Error {
   constructor() {
     super(
-      "Paystack is not configured. Add PAYSTACK_SECRET_KEY and PAYSTACK_PUBLIC_KEY to enable wallet funding.",
+      "Paystack is not configured. Add your Paystack keys in Admin → Payment gateway settings to enable wallet funding.",
     );
     this.name = "PaystackNotConfiguredError";
   }
+}
+
+/**
+ * Credentials come from the admin dashboard when they have been saved there,
+ * otherwise from the server environment. Live keys stay inert until an
+ * administrator enables live mode.
+ */
+async function activeConfig(): Promise<ResolvedPaystackConfig> {
+  const cfg = await resolvePaystackConfig();
+  if (!isPaystackConfigured(cfg)) throw new PaystackNotConfiguredError();
+  if (paystackLiveBlocked(cfg)) {
+    throw new Error(
+      "A live Paystack key is installed but live charging is not enabled. Use test mode, or enable live mode deliberately in Payment gateway settings.",
+    );
+  }
+  return cfg;
 }
 
 type InitResult = { authorizationUrl: string; accessCode: string; reference: string };
@@ -21,10 +42,21 @@ export async function initializeTransaction(input: {
   amountKobo: number;
   reference: string;
   callbackUrl: string;
+  channels?: string[];
   metadata?: Record<string, unknown>;
 }): Promise<InitResult> {
-  if (!isPaystackReady()) throw new PaystackNotConfiguredError();
-  const cfg = paystackConfig();
+  const cfg = await activeConfig();
+
+  const body: Record<string, unknown> = {
+    email: input.email,
+    amount: input.amountKobo,
+    reference: input.reference,
+    callback_url: input.callbackUrl,
+    metadata: input.metadata ?? {},
+  };
+  // Only restrict channels when the caller asked for a specific method. An empty
+  // or missing list is omitted so Checkout shows whatever the account enabled.
+  if (input.channels && input.channels.length > 0) body.channels = input.channels;
 
   const response = await fetchWithTimeout(`${cfg.baseUrl}/transaction/initialize`, {
     method: "POST",
@@ -33,13 +65,7 @@ export async function initializeTransaction(input: {
       Authorization: `Bearer ${cfg.secretKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      email: input.email,
-      amount: input.amountKobo,
-      reference: input.reference,
-      callback_url: input.callbackUrl,
-      metadata: input.metadata ?? {},
-    }),
+    body: JSON.stringify(body),
   });
 
   const payload = (await readJsonSafe(response)) as {
@@ -71,8 +97,7 @@ export type VerifyResult = {
 
 /** Server-side verification. A redirect is never treated as proof of payment. */
 export async function verifyTransaction(reference: string): Promise<VerifyResult> {
-  if (!isPaystackReady()) throw new PaystackNotConfiguredError();
-  const cfg = paystackConfig();
+  const cfg = await activeConfig();
 
   const response = await fetchWithTimeout(
     `${cfg.baseUrl}/transaction/verify/${encodeURIComponent(reference)}`,
@@ -112,10 +137,17 @@ export async function verifyTransaction(reference: string): Promise<VerifyResult
   };
 }
 
-/** Paystack signs webhooks with HMAC-SHA512 of the raw body using the secret key. */
-export function verifyWebhookSignature(rawBody: string, signature: string | null): boolean {
+/**
+ * Paystack signs webhooks with HMAC-SHA512 of the raw body using the secret key
+ * (or the dedicated webhook secret when one is configured). Async because the
+ * secret may come from the encrypted admin configuration.
+ */
+export async function verifyWebhookSignature(
+  rawBody: string,
+  signature: string | null,
+): Promise<boolean> {
   if (!signature) return false;
-  const cfg = paystackConfig();
+  const cfg = await resolvePaystackConfig();
   if (!cfg.webhookSecret) return false;
   const expected = createHmac("sha512", cfg.webhookSecret).update(rawBody).digest("hex");
   const a = Buffer.from(expected, "utf8");

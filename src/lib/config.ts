@@ -53,8 +53,11 @@ export function alrahuzConfig() {
 export function alrahuzHealth(): ProviderHealth {
   const cfg = alrahuzConfig();
   const missing: string[] = [];
-  if (!cfg.apiKey || cfg.apiKey === "YOUR_ALRAHUZ_API_KEY") missing.push("ALRAHUZ_API_KEY");
-  if (!cfg.baseUrl) missing.push("ALRAHUZ_API_BASE_URL");
+  // Placeholder values ("YOUR_...") are treated as missing so the status pages
+  // report an honest "not configured" state instead of echoing a fake endpoint.
+  const placeholderBaseUrl = cfg.baseUrl.startsWith("YOUR_");
+  if (!cfg.apiKey || cfg.apiKey.startsWith("YOUR_")) missing.push("ALRAHUZ_API_KEY");
+  if (!cfg.baseUrl || placeholderBaseUrl) missing.push("ALRAHUZ_API_BASE_URL");
   if (!cfg.endpointsVerified) missing.push("ALRAHUZ_ENDPOINTS_VERIFIED");
 
   const notes: string[] = [];
@@ -67,7 +70,7 @@ export function alrahuzHealth(): ProviderHealth {
     configured: missing.length === 0,
     verified: cfg.endpointsVerified,
     missing,
-    endpointBase: cfg.baseUrl || null,
+    endpointBase: placeholderBaseUrl ? null : cfg.baseUrl || null,
     notes,
   };
 }
@@ -84,6 +87,35 @@ export function paystackConfig() {
     baseUrl: (process.env.PAYSTACK_BASE_URL || "https://api.paystack.co").replace(/\/+$/, ""),
     timeoutMs: Number(process.env.PAYSTACK_TIMEOUT_MS || 20000),
     webhookSecret: process.env.PAYSTACK_WEBHOOK_SECRET?.trim() || secretKey,
+    testMode: secretKey.startsWith("sk_test_"),
+  };
+}
+
+/**
+ * Paystack does not expose an API that lists the channels enabled on a merchant
+ * account, and there is no standalone "palmpay" channel. PalmPay is a wallet
+ * that Paystack Checkout offers **inside the `bank` channel** for Nigerian
+ * businesses: the customer picks Bank, then PalmPay, then authorises with their
+ * PalmPay PIN.
+ *
+ * Because availability can only be confirmed in the dashboard, it is declared
+ * explicitly here. Until the merchant enables the Bank channel and sets
+ * PAYSTACK_PALMPAY_ENABLED=true, the PalmPay option stays visible-but-disabled
+ * and the API refuses it — funding is never simulated.
+ */
+export function paystackChannelConfig() {
+  const declared = (process.env.PAYSTACK_CHANNELS || "")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  const palmPayRequested = process.env.PAYSTACK_PALMPAY_ENABLED === "true";
+  const bankChannelAvailable = declared.length === 0 || declared.includes("bank");
+  return {
+    /** Empty means "do not restrict" — Checkout shows whatever Paystack enabled. */
+    declaredChannels: declared,
+    palmPayEnabled: palmPayRequested && bankChannelAvailable,
+    palmPayRequested,
+    bankChannelAvailable,
   };
 }
 
@@ -92,13 +124,65 @@ export function isPaystackReady(): boolean {
   return Boolean(cfg.secretKey && !cfg.secretKey.startsWith("YOUR_"));
 }
 
+/**
+ * Live keys are refused until the payment tests have been run and the owner
+ * opts in deliberately. Funding stays disabled rather than charging real cards
+ * during development.
+ */
+export function isPaystackLiveBlocked(): boolean {
+  const cfg = paystackConfig();
+  if (!cfg.secretKey.startsWith("sk_live_")) return false;
+  return process.env.PAYSTACK_ALLOW_LIVE !== "true";
+}
+
+/** Environment-variable view of Paystack readiness (no database access). */
 export function paystackHealth() {
   const cfg = paystackConfig();
+  return paystackHealthView({
+    secretKey: cfg.secretKey,
+    publicKey: cfg.publicKey,
+    webhookSecretExplicit: Boolean(process.env.PAYSTACK_WEBHOOK_SECRET?.trim()),
+    testMode: cfg.testMode,
+  });
+}
+
+export type PaystackHealthInput = {
+  secretKey: string;
+  publicKey: string;
+  /** True only when a webhook secret is configured explicitly, not inferred from the secret key. */
+  webhookSecretExplicit: boolean;
+  testMode: boolean;
+};
+
+/**
+ * Provider health computed from already-resolved credentials. Wallet funding,
+ * the admin dashboard and the health endpoint all use this so credentials saved
+ * from the admin dashboard behave exactly like environment variables.
+ */
+export function paystackHealthView(input: PaystackHealthInput) {
+  const channels = paystackChannelConfig();
+  const ready = Boolean(input.secretKey && !input.secretKey.startsWith("YOUR_"));
   const missing: string[] = [];
-  if (!isPaystackReady()) missing.push("PAYSTACK_SECRET_KEY");
-  if (!cfg.publicKey) missing.push("PAYSTACK_PUBLIC_KEY");
-  if (!process.env.PAYSTACK_WEBHOOK_SECRET) missing.push("PAYSTACK_WEBHOOK_SECRET");
-  return { configured: missing.length === 0, missing };
+  if (!ready) missing.push("PAYSTACK_SECRET_KEY");
+  if (!input.publicKey) missing.push("PAYSTACK_PUBLIC_KEY");
+  if (!input.webhookSecretExplicit) missing.push("PAYSTACK_WEBHOOK_SECRET");
+
+  const palmPayReason = !ready
+    ? "Paystack keys are not configured, so no checkout channel is live."
+    : !channels.bankChannelAvailable
+      ? "PAYSTACK_CHANNELS excludes the bank channel that PalmPay is served through."
+      : !channels.palmPayRequested
+        ? "Enable the Bank channel in the Paystack dashboard (Settings → Preferences → Payment channels), confirm PalmPay appears at checkout, then set PAYSTACK_PALMPAY_ENABLED=true."
+        : "PalmPay is enabled and will be offered through Paystack Checkout's Bank option.";
+
+  return {
+    configured: missing.length === 0,
+    ready,
+    missing,
+    testMode: input.testMode,
+    palmPayEnabled: ready && channels.palmPayEnabled,
+    palmPayReason,
+  };
 }
 
 export function resendConfig() {

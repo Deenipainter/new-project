@@ -1,7 +1,15 @@
 import { ok } from "@/lib/api";
-import { alrahuzHealth, isPaystackReady, paystackHealth, resendConfig } from "@/lib/config";
+import { loadAlrahuzHealth } from "@/lib/alrahuz-settings";
+import { resendConfig } from "@/lib/config";
 import { prisma } from "@/lib/db";
+import {
+  isPaystackConfigured,
+  paystackLiveBlocked,
+  paystackProviderHealth,
+  resolvePaystackConfig,
+} from "@/lib/payment-gateway";
 
+// Provider health, including Paystack test-mode and PalmPay channel readiness.
 export const dynamic = "force-dynamic";
 
 /**
@@ -16,8 +24,9 @@ export async function GET() {
     database = "down";
   }
 
-  const alrahuz = alrahuzHealth();
-  const paystack = paystackHealth();
+  const alrahuz = await loadAlrahuzHealth();
+  const paystackConfig = await resolvePaystackConfig();
+  const paystack = paystackProviderHealth(paystackConfig);
 
   return ok({
     app: "dp-data-sub",
@@ -29,7 +38,14 @@ export async function GET() {
         missing: alrahuz.missing,
         notes: alrahuz.notes,
       },
-      paystack: { ready: isPaystackReady(), missing: paystack.missing },
+      paystack: {
+        ready: isPaystackConfigured(paystackConfig) && !paystackLiveBlocked(paystackConfig),
+        missing: paystack.missing,
+        testMode: paystack.testMode,
+        palmPayEnabled: paystack.palmPayEnabled,
+        liveBlocked: paystackLiveBlocked(paystackConfig),
+        credentialSource: paystackConfig.source,
+      },
       resend: { configured: resendConfig().configured },
     },
     time: new Date().toISOString(),

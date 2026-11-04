@@ -1,11 +1,15 @@
 import { badRequest, ok, readBody, serverError, unauthorized } from "@/lib/api";
 import { getCurrentUser, hashPassword, verifyPassword } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { nameProblem, normalizePhone } from "@/lib/validation";
+import { isEmail, nameProblem, normalizeEmail, normalizePhone } from "@/lib/validation";
 
-type Body = { fullName?: string; phone?: string };
+type Body = { fullName?: string; phone?: string; email?: string; currentPassword?: string };
 
-/** Only name and phone are editable. Balance, role, email and IDs are not. */
+/**
+ * Name, phone and login email are editable. Balance, role and IDs are not.
+ * Changing the login email requires the current password, so a hijacked session
+ * cannot quietly move an account to another address.
+ */
 export async function PATCH(request: Request) {
   const user = await getCurrentUser();
   if (!user) return unauthorized();
@@ -13,7 +17,7 @@ export async function PATCH(request: Request) {
   const body = await readBody<Body>(request);
   if (!body) return badRequest("Send your changes as JSON.");
 
-  const data: { fullName?: string; phone?: string } = {};
+  const data: { fullName?: string; phone?: string; email?: string } = {};
 
   if (typeof body.fullName === "string") {
     const nameError = nameProblem(body.fullName);
@@ -32,13 +36,43 @@ export async function PATCH(request: Request) {
     data.phone = phone;
   }
 
+  if (typeof body.email === "string") {
+    const email = normalizeEmail(body.email);
+    if (email && email !== normalizeEmail(user.email)) {
+      if (!isEmail(email)) return badRequest("Enter a valid email address.", { email: "Invalid email." });
+
+      if (!body.currentPassword) {
+        return badRequest("Enter your current password to change your login email.", {
+          currentPassword: "Required.",
+        });
+      }
+
+      const record = await prisma.user.findUnique({
+        where: { id: user.id },
+        select: { passwordHash: true },
+      });
+      if (!record) return unauthorized();
+      if (!(await verifyPassword(body.currentPassword, record.passwordHash))) {
+        return badRequest("Your current password is incorrect.", { currentPassword: "Incorrect." });
+      }
+
+      const taken = await prisma.user.findFirst({
+        where: { email, NOT: { id: user.id } },
+        select: { id: true },
+      });
+      if (taken) return badRequest("That email is already used by another account.", { email: "Already in use." });
+
+      data.email = email;
+    }
+  }
+
   if (Object.keys(data).length === 0) return badRequest("Nothing to update.");
 
   try {
     const updated = await prisma.user.update({
       where: { id: user.id },
       data,
-      select: { fullName: true, phone: true },
+      select: { fullName: true, phone: true, email: true },
     });
     await prisma.auditEvent.create({
       data: {

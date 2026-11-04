@@ -53,7 +53,7 @@ export function WalletCard({
             className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-white px-4 text-[13.5px] font-semibold text-brand-dark transition-colors hover:bg-white/90"
           >
             <Plus className="size-4" />
-            Add Money
+            Fund Wallet
           </Link>
           <Link
             href="/transactions"

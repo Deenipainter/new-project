@@ -7,7 +7,12 @@ import { AppShell } from "@/components/layout/app-shell";
 import { StatusBadge } from "@/components/transactions";
 import { WalletCard } from "@/components/wallet-card";
 import { requireUser } from "@/lib/auth";
-import { isPaystackReady, paystackHealth } from "@/lib/config";
+import {
+  isPaystackConfigured,
+  paystackLiveBlocked,
+  paystackProviderHealth,
+  resolvePaystackConfig,
+} from "@/lib/payment-gateway";
 import { prisma } from "@/lib/db";
 import { formatDateTime } from "@/lib/format";
 import { formatNaira } from "@/lib/money";
@@ -51,8 +56,10 @@ export default async function WalletPage() {
     loadFailed = true;
   }
 
-  const paymentsReady = isPaystackReady();
-  const missing = paystackHealth().missing;
+  // Readiness follows the credentials actually in force: saved first, then environment.
+  const paystack = await resolvePaystackConfig();
+  const paymentsReady = isPaystackConfigured(paystack) && !paystackLiveBlocked(paystack);
+  const missing = paystackProviderHealth(paystack).missing;
 
   return (
     <AppShell
@@ -106,7 +113,7 @@ export default async function WalletPage() {
                   href="/wallet/fund"
                   className="mt-3 inline-flex h-9 items-center rounded-lg bg-brand px-4 text-[12.5px] font-semibold text-white"
                 >
-                  Add money
+                  Fund wallet
                 </Link>
               </div>
             ) : (
@@ -154,7 +161,7 @@ export default async function WalletPage() {
 
         <aside className="space-y-4">
           <div className="panel p-4">
-            <p className="section-label">Add money</p>
+            <p className="section-label">Fund wallet</p>
             {paymentsReady ? (
               <>
                 <p className="mt-1.5 text-[12px] leading-relaxed text-ink-muted">

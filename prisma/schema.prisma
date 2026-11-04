@@ -153,6 +153,7 @@ model PaymentAttempt {
   authorizationUrl String?
   providerReference String?
   channel         String?
+  requestedMethod String?
   verifiedAt      DateTime?
   failureReason   String?
   createdAt       DateTime @default(now())
@@ -260,4 +261,58 @@ model Announcement {
   body      String
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
+}
+
+/// Alrahuz Data credentials managed from Admin -> Alrahuz API settings.
+///
+/// The API key is stored as AES-256-GCM ciphertext ("v1.<iv>.<tag>.<ct>") using
+/// the same server-side vault as the Paystack settings. The base URL is plain
+/// configuration, never a secret. Nothing in this table is ever sent back to the
+/// browser: the admin page only receives booleans, the masked state and the
+/// non-secret connection result.
+model AlrahuzSettings {
+  id                    String    @id @default("alrahuz")
+  provider              String    @default("alrahuz")
+  apiKeyCipher          String?
+  /// Provider host supplied by the administrator, e.g. https://host.example
+  baseUrl               String?
+  /// Authorization header scheme from the provider's documentation: Token | Bearer
+  authScheme            String    @default("Token")
+  /// Read-only path used by "Test Connection" (from the provider's documentation).
+  checkPath             String?
+  lastValidatedAt       DateTime?
+  lastValidatedOk       Boolean?
+  lastValidationState   String?
+  lastValidationMessage String?
+  updatedById           String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+}
+
+/// Paystack gateway credentials managed from the admin dashboard.
+///
+/// Every credential column holds AES-256-GCM ciphertext ("v1.<iv>.<tag>.<ct>"),
+/// never a plaintext key. The encryption key lives only in server-side
+/// environment variables, so a database dump alone cannot reveal a secret.
+/// Live mode stays locked until an administrator explicitly approves it here.
+model PaymentGatewaySettings {
+  id                    String    @id @default("paystack")
+  provider              String    @default("paystack")
+  secretKeyCipher       String?
+  publicKeyCipher       String?
+  webhookSecretCipher   String?
+  /// "test" | "live" — the family of the stored secret key. Never the key itself.
+  secretKeyKind         String?
+  publicKeyKind         String?
+  /// "TEST" | "LIVE". Live charging stays disabled unless this is LIVE *and*
+  /// liveApprovedAt is set by an administrator.
+  mode                  String    @default("TEST")
+  liveApprovedAt        DateTime?
+  liveApprovedById      String?
+  lastValidatedAt       DateTime?
+  lastValidatedOk       Boolean?
+  lastValidationMessage String?
+  updatedById           String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 }

@@ -95,7 +95,7 @@ export default async function ProfilePage() {
           </dl>
         </section>
 
-        <ProfileForms fullName={user.fullName} phone={user.phone} />
+        <ProfileForms fullName={user.fullName} phone={user.phone} email={user.email} />
 
         <section className="panel p-4">
           <h2 className="text-[14px] font-semibold">Account &amp; support</h2>

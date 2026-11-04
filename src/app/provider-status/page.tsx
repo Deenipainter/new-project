@@ -5,7 +5,14 @@ import { AlertTriangle, CheckCircle2, CircleDashed, ExternalLink, KeyRound } fro
 
 import { AppShell } from "@/components/layout/app-shell";
 import { requireUser } from "@/lib/auth";
-import { alrahuzHealth, isPaystackReady, paystackHealth, resendConfig } from "@/lib/config";
+import { loadAlrahuzHealth } from "@/lib/alrahuz-settings";
+import { resendConfig } from "@/lib/config";
+import {
+  isPaystackConfigured,
+  paystackLiveBlocked,
+  paystackProviderHealth,
+  resolvePaystackConfig,
+} from "@/lib/payment-gateway";
 
 export const metadata = { title: "Integration status" };
 export const dynamic = "force-dynamic";
@@ -30,8 +37,17 @@ function StatusRow({ row }: { row: Row }) {
 
 export default async function ProviderStatusPage() {
   const user = await requireUser();
-  const alrahuz = alrahuzHealth();
-  const paystack = paystackHealth();
+  const alrahuz = await loadAlrahuzHealth();
+  const paystackConfig = await resolvePaystackConfig();
+  const paystack = paystackProviderHealth(paystackConfig);
+  const liveBlocked = paystackLiveBlocked(paystackConfig);
+  const fundingReady = isPaystackConfigured(paystackConfig) && !liveBlocked;
+  const credentialSource =
+    paystackConfig.source === "saved"
+      ? "Admin → Payment gateway settings"
+      : paystackConfig.source === "environment"
+        ? "Server environment variables"
+        : "Not configured";
   const email = resendConfig();
 
   const alrahuzRows: Row[] = [
@@ -43,9 +59,10 @@ export default async function ProviderStatusPage() {
         : "Not set. The provider host must be supplied by the account owner — no URL is guessed.",
     },
     {
-      label: "API key (ALRAHUZ_API_KEY)",
+      label: "API key (Admin → Alrahuz API settings)",
       done: !alrahuz.missing.includes("ALRAHUZ_API_KEY"),
-      detail: "Stored server-side only. It is never sent to the browser or written to logs.",
+      detail:
+        "Stored encrypted server-side, or supplied by ALRAHUZ_API_KEY. It is never sent to the browser or written to logs.",
     },
     {
       label: "Endpoint contract confirmed (ALRAHUZ_ENDPOINTS_VERIFIED)",
@@ -62,21 +79,39 @@ export default async function ProviderStatusPage() {
 
   const paystackRows: Row[] = [
     {
-      label: "Secret key (PAYSTACK_SECRET_KEY)",
-      done: paystack.missing.length === 0 || !paystack.missing.includes("PAYSTACK_SECRET_KEY"),
-      detail: "Used server-side for initialisation and verification.",
+      label: "Secret key",
+      done: !paystack.missing.includes("PAYSTACK_SECRET_KEY"),
+      detail: `Used server-side for initialisation and verification. Source: ${credentialSource}.`,
     },
     {
-      label: "Public key (PAYSTACK_PUBLIC_KEY)",
+      label: "Public key",
       done: !paystack.missing.includes("PAYSTACK_PUBLIC_KEY"),
       detail: "Optional for redirect checkout, required for inline checkout later.",
     },
     {
-      label: "Webhook secret (PAYSTACK_WEBHOOK_SECRET)",
+      label: "Webhook secret",
       done: !paystack.missing.includes("PAYSTACK_WEBHOOK_SECRET"),
       detail: "Webhook URL to register: /api/payments/webhook — signatures are verified before any credit.",
     },
-    { label: "Live funding switched on", done: isPaystackReady(), detail: "Funding buttons stay disabled until a secret key exists." },
+    {
+      label: "PalmPay via Paystack (PAYSTACK_PALMPAY_ENABLED)",
+      done: paystack.palmPayEnabled,
+      detail: paystack.palmPayReason,
+    },
+    {
+      label: "Live charging guard",
+      done: !liveBlocked,
+      detail: liveBlocked
+        ? "Live keys are installed but live charging is blocked until an administrator enables live mode in Payment gateway settings. Funding is refused."
+        : paystack.testMode
+          ? "Test keys in use — checkout accepts Paystack test cards only. No real money moves."
+          : "Live mode was enabled deliberately by an administrator.",
+    },
+    {
+      label: "Funding switched on",
+      done: fundingReady,
+      detail: "Funding stays disabled until a usable secret key exists and live charging is permitted.",
+    },
   ];
 
   return (
@@ -131,12 +166,12 @@ export default async function ProviderStatusPage() {
             <h2 className="text-[14px] font-semibold">Paystack (wallet funding)</h2>
             <span
               className={
-                isPaystackReady()
+                fundingReady
                   ? "rounded-full border border-[#C9EBD9] bg-[#EAF7F0] px-2 py-0.5 text-[10.5px] font-semibold text-[#0B7A45]"
                   : "rounded-full border border-[#F3E2C0] bg-[#FBF4E6] px-2 py-0.5 text-[10.5px] font-semibold text-[#8A5B12]"
               }
             >
-              {isPaystackReady() ? "Ready" : "Not configured"}
+              {fundingReady ? "Ready" : "Not configured"}
             </span>
           </div>
           <ul className="divide-y divide-line">
@@ -184,9 +219,9 @@ export default async function ProviderStatusPage() {
           <div>
             <p className="text-[12.5px] font-semibold">How to add credentials safely</p>
             <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-muted">
-              Add keys to the project environment file — never in page code, browser storage or chat. Ask
-              the studio to open the environment file for you, paste the value, then reload the preview.
-              Keys remain server-side and are redacted from diagnostics.
+              Store provider keys in Admin → Alrahuz API settings (or Payment gateway settings), where they
+              are encrypted before storage, or in the project environment file. Never put keys in page
+              code, browser storage or chat. Keys remain server-side and are redacted from diagnostics.
             </p>
             <Link
               href="/admin"

@@ -36,6 +36,9 @@ See `.env.example`. Minimum for a working app:
 | `NEXT_PUBLIC_APP_URL` | absolute URL used in email links outside a browser request |
 | `ALRAHUZ_API_KEY`, `ALRAHUZ_API_BASE_URL`, `ALRAHUZ_ENDPOINTS_VERIFIED` | VTU provider |
 | `PAYSTACK_SECRET_KEY`, `PAYSTACK_PUBLIC_KEY`, `PAYSTACK_WEBHOOK_SECRET` | wallet funding |
+| `PAYSTACK_PALMPAY_ENABLED` | set `true` only after PalmPay is confirmed in your Paystack checkout |
+| `PAYSTACK_CHANNELS` | optional comma list of channels enabled on the account (`card,bank,ussd,bank_transfer`) |
+| `PAYSTACK_ALLOW_LIVE` | `true` to permit live keys; live charging stays blocked until then |
 | `RESEND_API_KEY`, `EMAIL_FROM` | verification / reset email |
 | `REFERRAL_REWARD_KOBO` | referral bonus, `0` = track only |
 
@@ -49,6 +52,41 @@ Register `https://<your-domain>/api/payments/webhook` in the Paystack dashboard.
 
 A redirect back to `/wallet/fund/callback` triggers the same server-side verification; a query string
 alone never credits a wallet.
+
+Settlement is one serialisable transaction: the ledger row, the wallet balance and the payment status
+commit together, and `LedgerEntry.reference` (`PAY-<reference>`) is unique, so duplicate webhooks and a
+webhook/verify race cannot credit twice.
+
+### PalmPay (through Paystack, not a separate integration)
+
+Paystack has no standalone PalmPay channel and no API that lists a merchant's enabled channels. For
+Nigerian accounts PalmPay is a wallet offered **inside the `bank` channel**: the customer picks Bank, then
+PalmPay, then authorises with their PalmPay PIN.
+
+The **PalmPay** option on `/wallet/fund` therefore sends `channels: ["bank"]` to
+`POST /transaction/initialize`. It is offered only when all of the following are true:
+
+1. `PAYSTACK_SECRET_KEY` is a real key,
+2. the Bank channel is enabled in the Paystack dashboard under *Settings → Preferences → Payment channels*,
+3. `PAYSTACK_PALMPAY_ENABLED=true` is set here after confirming PalmPay appears at checkout.
+
+Until then the option renders disabled with the reason, and `POST /api/wallet/fund` refuses it with
+`PAYMENT_METHOD_UNAVAILABLE` — no payment is simulated. The channel list is always resolved on the server
+from the submitted method id; a `channels` field in the request body is ignored.
+
+`PAYSTACK_CHANNELS` is optional and only narrows the offer: if it is set and omits `bank`, PalmPay is
+unavailable regardless of the flag.
+
+### Payment tests
+
+```bash
+NODE_OPTIONS=--conditions=react-server npx tsx scripts/payment-flows.mts
+```
+
+Runs the real settlement engine, ledger, Paystack client and database against a local mock provider
+(`127.0.0.1:5555`, test keys injected by the script). Covers success, duplicate verify, duplicate webhook,
+cancelled checkout, failed payment, wrong amount, wrong currency, unknown/foreign references, channel
+mapping and PalmPay gating. It creates one test user and deletes it plus its rows afterwards.
 
 ### Alrahuz integration
 

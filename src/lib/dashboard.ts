@@ -3,7 +3,8 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { loadServiceStates } from "@/lib/services";
 import { listTransactions, type TxView } from "@/lib/transactions";
-import { isAlrahuzReady, isPaystackReady } from "@/lib/config";
+import { isAlrahuzReady } from "@/lib/config";
+import { isPaystackFundingReady } from "@/lib/payment-gateway";
 import type { ServiceState } from "@/lib/catalog";
 
 export type DashboardData = {
@@ -16,6 +17,10 @@ export type DashboardData = {
   providers: { alrahuz: boolean; paystack: boolean };
 };
 
+/**
+ * Provider flags reflect the credentials actually in force: values saved from
+ * Admin → Payment gateway settings first, environment variables second.
+ */
 export async function loadDashboard(userId: string, referralCode: string): Promise<DashboardData> {
   try {
     const [transactions, services, announcements, referral] = await Promise.all([
@@ -46,7 +51,7 @@ export async function loadDashboard(userId: string, referralCode: string): Promi
         qualified: referral.filter((row) => row.qualifiedAt).length,
       },
       pendingOrders,
-      providers: { alrahuz: isAlrahuzReady(), paystack: isPaystackReady() },
+      providers: { alrahuz: isAlrahuzReady(), paystack: await isPaystackFundingReady() },
     };
   } catch (error) {
     console.error("[dashboard] load failed", error instanceof Error ? error.message : error);
@@ -57,7 +62,8 @@ export async function loadDashboard(userId: string, referralCode: string): Promi
       announcements: [],
       referral: { code: referralCode, total: 0, qualified: 0 },
       pendingOrders: 0,
-      providers: { alrahuz: isAlrahuzReady(), paystack: isPaystackReady() },
+      // Even a failed dashboard load reports the real gateway state.
+      providers: { alrahuz: isAlrahuzReady(), paystack: await isPaystackFundingReady() },
     };
   }
 }
